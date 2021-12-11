@@ -1,2 +1,32 @@
-# Proyectos_master
- Diferentes proyectos realizados durante Máster en Data y Analytics
+# Contenido
+Diferentes proyectos realizados durante Máster en Data y Analytics.
+
+A continuación, indico en qué consiste cada challenge, y palabras clave asociadas al mismo:
+
+## Challenge 1
+Utilizar datos de diferentes fuentes para evaluar si las predicciones de un software están sesgadas o no.
+
+Palabras clave: **Python, pandas, matplotlib, EDA, feature engineering, clasificador binario, matriz de confusión**
+
+##  Challenge 2
+Creación y explotación de un datamart desde 0.
+
+Palabras clave: **Diseño de datamart, Base de datos SQL, ETL, Pentaho PDI, Visualización, PowerBI**
+
+## Challenge 3
+Creación de un modelo de regresión lineal para precedir el coste de la prima del seguro médico, para un conjunto de pacientes.
+
+Palabras clave: **R, dplyr, ggplot, EDA, visualización, análisis estadístico, selección de variables, regresión lineal**
+
+##  Challenge 4
+Evaluación de diferentes modelos de machine learning para predecir con la mayor precisión posible si una persona que visita nuestra web es un potencial comprador o no.
+
+Palabras clave: **Python, scikit-learn, EDA, preprocesamiento de datos, optimización de parámetros, modelos de clasificación, métricas de evaluación**
+
+##  Challenge 5
+Realización de consultas a diferentes bases de datos. Contiene 3 challenges:
+- Challenge 5.1: Creación de una base de datos en un clúster de Databricks, utilización de PySpark SQL para obtener informes.
+- Challenge 5.2: Creación de una base de datos ingestando documentos JSON en MongoDB, realización de consultas para obtener informes.
+- Challenge 5.3: Creación de una base de datos orientada a grafos en Neo4J, realización de consultas para obtener informes.
+
+Palabras clave: **Consultas a base de datos, Pyspark SQL, NoSQL, Databricks, MongoDB, Neo4J**
