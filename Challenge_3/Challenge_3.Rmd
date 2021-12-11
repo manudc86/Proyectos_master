@@ -1,0 +1,518 @@
+---
+title: "Caso práctico final"
+output: html_notebook
+---
+
+# Descripción corta del challenge
+
+Partiendo de un dataset de Kaggle, se realiza un análisis exploratorio de datos utilizando diferentes visualizaciones y técnicas estadísticas, se extraen conclusiones interesantes. Se seleccionan variables, se construye un modelo de regresión lineal, y se analizan las predicciones del modelo.
+
+# Contexto
+
+Ha de escogerse una BBDD para realizar una exploración estadística propia de un científico de datos. Seguir los siguientes pasos para desarrollar el proyecto:
+
+- Extracción de los datos / origen de los datos (habitualmente csv)
+- EDA
+- Inferencia estadística
+- Pre-procesado de datos, si tras aplicar los test hacemos alguna modificación de las columnas.
+- Selección de variables.
+- Modelos lineales.
+- Interpretación de resultados / conclusiones.
+
+# Dataset elegido
+
+He escogido un dataset de Kaggle "Medical Cost Personal Datasets" (https://www.kaggle.com/mirichoi0218/insurance?select=insurance.csv), sugerido por un website (https://www.telusinternational.com/articles/10-open-datasets-for-linear-regression) cuando googleé datasets interesantes sobre los que implementar algoritmos de regresión lineal. La variable target es numérica, por lo que utilizaremos regresión lineal.
+
+Utilizando la información de este dataset, trataremos de predecir el coste de la prima del seguro médico, basándonos en una serie de características recopiladas sobre personas que tienen contratado un seguro (en USA).
+
+Las variables (7) recogidas en este dataset son las siguientes:
+
+- age: edad del asegurado
+- sex: género del asegurado
+- bmi: índice de masa corporal. Se calcula dividiendo el peso de una persona (kg.) por su altura (m.) al cuadrado. Los valores normales suelen estar entre 18.5 y 25, valores fuera de ese intervalo pueden ser indicadores de excesiva delgadez o sobrepeso.
+- children: cito la explicación en la web donde encontré el dataset: "Number of children covered by health insurance / Number of dependents". Parece que los hijos/dependientes que no estén asegurados no se tienen en cuenta, no queda claro qué pasa si tienes hijos y también tienes personas dependientes (supongo que deberían sumarse)... De todas formas, a efectos de este estudio, puede que no haga falta profundizar en el significado de esta variable.
+- smoker: es fumador o no
+- region: dónde reside el asegurado
+- charges (TARGET): Prima del seguro en dólares. Variable numérica.
+
+# Solución
+
+## Carga de paquetes
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(MASS)
+```
+
+
+
+## 1.Extracción de los datos
+
+```{r}
+df <- read.csv("insurance.csv", sep=",", header = T)
+```
+
+
+```{r}
+head(df)
+```
+
+## 2. EDA
+
+### Exploración preliminar
+
+Obtenemos información muy superficial sobre los datos en su conjunto
+
+```{r}
+nrow(df)
+ncol(df)
+str(df)
+```
+```{r}
+summary(df)
+```
+
+Vamos a revisar el número de valores diferentes que tenemos para las variables de tipo character. Si tienen pocos valores, son buenas candidatas a ser reconvertidas a variables factor.
+
+```{r}
+df %>% select_if(is.character) %>% sapply(unique) 
+```
+```{r}
+# Transformamos estas 3 variables a tipo factor, en este caso no ordenados
+df$sex <- as.factor(df$sex)
+df$smoker <- as.factor(df$smoker)
+df$region <- as.factor(df$region)
+```
+
+Repetimos summary para checkear los valores para cada nivel en las variables factor
+
+```{r}
+df %>% select_if(is.factor) %>% summary
+```
+
+```{r}
+# Buscamos valores nulos en el dataframe
+sapply(df, function(x) sum(is.na(x)))
+
+```
+
+```{r}
+# Buscamos duplicados
+sum(duplicated(df))
+```
+```{r}
+# Tenemos un duplicado. Examinarlo más en detalle
+df %>% dplyr::filter(duplicated(df) | duplicated(df, fromLast = TRUE))
+# Es bastante coincidencia para no considerarlo un duplicado, pero tampoco podemos estar 100% seguros de que lo sea. Como sólo es un valor, simplemente lo vamos a dejar estar
+```
+
+### Análisis univariable
+
+Utilizamos un bucle para representar gráficamente cómo está distribuida cada una de las variables. Para cada tipo de variable (factor, numérica) del dataframe usaremos un gráfico diferente
+
+```{r}
+for (columna in 1:ncol(df)){
+  if (class(df[,columna]) == "factor"){
+    # Gráfico de barras para las variables factor.
+    plot(df[,columna], 
+         col = topo.colors(length(levels(df[,columna]))),
+         las = 1,
+         main = paste("Diagrama de barras de: ", colnames(df[columna])))
+  } else {
+    # Histograma para las variables numéricas.
+    hist(df[, columna], 
+         border = "blue", 
+         col = "tomato", 
+         las = 1, 
+         main = paste("Histograma de: ", colnames(df[columna])),
+         xlab  = colnames(df[columna]))
+  }
+}
+```
+
+**Observaciones**
+
+- Age:
+
+Curioso que la edad mínima sea 18, y que el intervalo de edad con mayor frecuencia sea precisamente los menores de 20 años. Lo vamos a examinar más en profundidad.
+
+
+```{r}
+# de forma numérica
+df %>% dplyr::select (age) %>% filter(age < 25) %>% table
+
+# muy llamativo. En la siguiente etapa (análisis multivariable) seguiremos indagando y tomaremos una decisión acerca de qué hacer con estos valores
+```
+- Sex:
+
+Nada llamativo.
+
+- bmi:
+
+Distribución bastante similar a la distribución normal, simétrica y con forma de campana, lo cual parece plausible para una variable como el bmi. La mediana está en valores muy altos, si bien USA es un país donde es bastante corriente el sobrepeso. LLaman la atención valores superiores a 40, obesidad de clase 3 o high risk obesity según https://medlineplus.gov/ency/patientinstructions/000348.htm
+
+Qué porcentaje de nuestro dataset tienen obesidad de clase 3?
+
+```{r}
+nrow(subset(df, bmi > 40))/nrow(df)*100
+```
+
+https://www.cdc.gov/obesity/data/adult.html: From 1999 –2000 through 2017 –2018, US obesity prevalence increased from 30.5% to 42.4%. During the same time, the prevalence of severe obesity increased from 4.7% to 9.2%. (NOTA: severe obesity es la obesidad que antes denominamos "clase 3").
+
+Para hacer estudios más en profundidad, habría que recabar información acerca de la fecha en la que fueron recopilados los datos, si tuviésemos el dato de obesidad de clase 3 de USA incluso podríamos valorar obtener el intervalo de confianza de la proporción de nuestra muestra para ver si incluye al dato que encontrásemos (teniendo en cuenta que dicho dato no es la realidad, también procede de un muestreo!)... Para los propósitos de este ejercicio, creo que con la información del párrafo anterior es suficiente para asumir que este porcentaje de obesidad clase 3 de nuestro dataset es plausible.
+
+- children:
+En cuanto a la distribución de valores, nada anómalo en principio. Lo que vamos a hacer es transformar esta variable a tipo factor con 3 niveles: sin hijos, 1-3 hijos, 4+ hijos.
+
+```{r}
+df$children <- cut(df$children, breaks = c(-0.5,0.5,3.5,5.5), labels=c("No_children","1-3_children", "4+_children"))
+```
+
+
+- smoker:
+
+Mayoría de no fumadores
+
+- region:
+
+Bastante equidistribuidas
+
+- (TARGET) charges:
+
+recordamos:
+
+```{r}
+summary(df$charges)
+```
+
+A la vista del histograma y del summary, se ve que la tendencia es que cuanto mayor es la cuota, menos personas encontramos en nuestra muestra, siendo los valores máximos para los intervalos de frecuencia más cercanos al 0. También llama la atención que hay valores muy altos. Vamos a investigar más en profundidad los valores extremos de nuestra distribución:
+
+Para los valores más bajos: es curioso que el intervalo de frecuencia máxima en nuestro histograma de charges sea el [0,5000], con una frecuencia muy similar a la del siguiente intervalo [5000,10000]. Puede ser perfectamente plausible, pero vamos a visualizar en un gráfico más en detalle estos datos.
+
+
+```{r}
+ggplot (df[df$charges < 15000, ]) +
+  geom_density(aes(x=charges))
+
+# A priori, es una distribución plausible, hay una tarifa mínima, tenemos la frecuencia máxima entorno a 2500 dólares, y luego comienza a descender
+```
+Para los valores más altos: 
+
+```{r}
+df %>% filter(charges > 50000) %>% summary
+
+# 7 casos, nada excesivamente revelador, bmi más alto que la media, todos son fumadores. Continuamos investigando más adelante.
+```
+
+**Primeras conclusiones**
+
+- Outliers en la variable target. Pueden tener una influencia excesiva en el tipo de modelo que usaremos
+- Cantidad de observaciones de menores de 20 años anómalamente alta. Se seguirá indagando
+
+
+
+### Análisis bivariable (vs TARGET, y entre variables independientes numéricas)
+
+Definimos nuevamente un bucle para representar todas las variables independientes respecto a la variable de respuesta, de nuevo eligiendo el gráfico más adecuado para cada tipo de datos
+
+```{r, warning=FALSE}
+explain.target <- function(dataframe.object, target.feature){
+  
+  for (columna in 1:ncol(dataframe.object)){
+    
+    if (names(dataframe.object[columna]) == "charges"){
+      next
+      
+    } else {
+      if (class(dataframe.object[, columna]) == "factor"){
+        plot <- ggplot(dataframe.object) + 
+          geom_boxplot(aes(x = dataframe.object[, "charges"], fill = as.factor(dataframe.object[, columna]))) +
+          coord_flip() +
+          labs(title=paste(names(dataframe.object[columna]), " ~ charges"),
+               fill= names(dataframe.object[columna]) ) + 
+          xlab("charges")
+      
+      } else {
+        plot <- ggplot(dataframe.object) + 
+          geom_point(aes(x = dataframe.object[, columna], y = dataframe.object[, "charges"])) + 
+          labs(title=paste(names(dataframe.object[columna]), " ~ charges")) + 
+          xlab(names(dataframe.object[columna])) +
+          ylab("charges")
+      }
+      plot <- print(plot)
+    }
+  }
+}
+
+explain.target(dataframe.object = df, target.feature = df$charges)
+```
+Para las dos variables independientes numéricas, calculamos el coeficiente de correlación para descartar posibles problemas de multicolinealidad
+
+```{r}
+cor.test(df$age,df$charges, method = "pearson")
+
+# correlación estadísticamente significativa, con un valor entorno a +0.3. No debería de suponernos un problema a nivel de multicolinealidad.
+```
+
+
+**Observaciones**
+
+- sex, children, region, smoker (las variables categóricas):
+
+Parece que, de todas ellas, la única que muestra relación de dependencia con la variable target es smoker. Y esa relación es clara
+
+En este caso, no podemos utilizar una prueba como anova, porque como vemos en los boxplots cada factor muestra una dispersión diferente y no se van a cumplir algunos de los supuestos necesarios para el test ANOVA: distribución normal y varianza constante (homocedasticidad) dentro de cada uno de los grupos
+
+
+- age:
+
+Gráfica muy interesante, por dos aspectos distintos
+
+En primer lugar, se ve que existe una relación lineal entre age y charges, siendo directamente proporcionales. Vamos a tratar de cuantificar esta relación
+
+```{r}
+regresion_age <- lm(charges ~ age, data=df)
+summary(regresion_age)
+
+# hay una relación estadísticamente significativa, y lineal entre age y charges (los p valores de los contrastes de hipótesis usados para el coeficiente alfa, coeficiente beta, test de Fisher, son todos ínfimos). Ahora bien, el coeficiente r^2 nos muestra que no es una correlación fuerte: cuando analizamos el conjunto de datos, la variabilidad no explicada por ages es muy superior en relación a la variabilidad explicada por ages. Lo cual concuerda bastante con las impresiones que se observan a simple vista del scatterplot anterior
+
+# Del valor del coeficiente beta, deducimos que por cada 10 años que pasan, la prima de seguro sube unos 2577 dólares
+```
+
+En segundo lugar, más allá de esa relación lineal que hemos visto que existe entre age y charges, es muy interesante la forma en que se dispersan los valores en el gráfico. Parece como si se distribuyesen en tres grupos, todos ellos teniendo una relación lineal respecto a age y además con una pendiente (coeficiente beta) similar.
+
+Es decir, puede que dentro de nuestros datos tengamos una variable (o combinación de variables) de tipo categórico que nos clasifica los valores de charges en 3 grupos distintos, bien distinguibles los unos de los otros.
+
+Vamos a intentar a través del EDA de encontrar esos factores que nos ayuden a explicar la variabilidad que por ahora no hemos podido explicar. Para ello, partiendo de la base del scatterplot anterior, vamos a mostrar los puntos de un color diferente dependiendo de los niveles del resto de variables categóricas:
+
+```{r}
+explain.target2 <- function(dataframe.object){
+  
+  for (columna in 1:ncol(dataframe.object)){
+
+    if (names(dataframe.object[columna]) == "age" | names(dataframe.object[columna]) == "charges"){
+    next
+    
+    } else {    
+      if (class(dataframe.object[, columna]) == "factor"){
+        plot <- ggplot(dataframe.object) + 
+          geom_point(aes(x = dataframe.object[, "age"], y = dataframe.object[, "charges"], 
+                         colour=as.factor(dataframe.object[, columna])), alpha=0.5, shape=16) +
+          labs(title=paste("age ~ charges por", names(dataframe.object[columna])),
+               colour = names(dataframe.object[columna])) + 
+          xlab("age") + 
+          ylab("charges")
+      
+      } else {
+        plot <- ggplot(dataframe.object) + 
+          geom_point(aes(x = dataframe.object[, "age"], y = dataframe.object[, "charges"], 
+                         colour=dataframe.object[, columna]), alpha=0.5, shape=16) +
+          labs(title=paste("age ~ charges por", names(dataframe.object[columna])),
+               colour = names(dataframe.object[columna])) + 
+          xlab("age") + 
+          ylab("charges") +
+          scale_color_gradient(low="blue", high="green")
+      }
+      plot <- print(plot)
+    }
+  }
+}
+
+
+explain.target2(dataframe.object = df)
+```
+
+Muy llamativa la gráfica en función de si es fumador o no. Nos explica gran parte de la variabilidad que antes no teníamos explicada: la nube de puntos más abajo en el eje y corresponde en gran parte a no fumadores (colores rojos), la nube en la parte superior corresponde a los no fumadores, y en la banda intermedia tenemos una mezcla. Vamos a ver si somos capaces de explicar esta variabilidad en la zona intermedia a través de alguna de las otras variables restantes.
+
+bmi parece una buena candidata en ese sentido. En el gráfico de bmi, parece que en la nube inferior predominan los colores más azulados (valor bajo bmi), en la nube intermedia predominan más los tonos violetas y grisáceos (valor intermedio bmi) y en la nube superior predominan los tonos grisáceos y verdosos (valor alto bmi).
+
+Para estudiar con un poco más de claridad el comportamiento de bmi, vamos a aislar el efecto de la variable smoker, y vamos a volver a representar el gráfico.
+
+```{r}
+ggplot(df) +
+geom_point(aes(x = age, y = charges, colour=bmi), alpha=0.5, shape=16) +
+scale_color_gradient(low="blue", high="green") +
+facet_wrap(~smoker)
+```
+
+Se ve con un poco más de claridad lo que se apuntaba anteriormente: para una misma franja de edad, cuanto más subimos en el eje y (charges), más cambia el color del punto en el sentido creciente (azul->verde) en la escala bmi. Esto apunta a que hay una relación directa entre ambas variables.
+
+Lo que queda un poco sin explicar, es ese patrón de división en nubes de puntos que vemos en los gráficos anteriores. Si la relación de bmi con age y charges fuese lineal, el cambio de color sería progresivo y sin espacios en el medio, no tendríamos ese salto entre ambas nubes con un espacio en blanco.
+
+
+- bmi:
+
+Aunque ya hemos estudiando bastante esta variable en conjunción con otra, hacemos un estudio por separado.
+Del scatter plot contra la variable target, parece que hay una correlación lineal positiva no muy fuerte. 
+
+```{r}
+# Lo confirmamos haciendo una regresión
+regresion_bmi <- lm(charges ~ bmi, data=df)
+summary(regresion_bmi)
+
+# viene a confirmar las suposiciones hechas a la vista del scatterplot
+```
+
+
+Curioso cómo se distribuye la nube de puntos. Para aquellos con charges inferiores a 17500 (que es gran parte de la muestra), la nube forma más o menos un rectángulo. Para valores de bmi entre 22 y 30, vemos que hay una nube de puntos que destaca con charges más altas de lo normal (17500-30000 dólares). Y para valores de bmi superiores a 30, vemos otra nube de puntos que destaca aún más, con charges entre 35000 y 50000 dólares.
+
+Estas dos nubes que destacan, se corresponden a los fumadores?
+
+```{r}
+ggplot(df) +
+  geom_point(aes(x = bmi, y = charges), alpha=0.5, shape=16) +
+  facet_wrap(~smoker)
+```
+
+Gráfica muy llamativa. Parece que el comportamiento de bmi frente a charges está bastante influenciado por otra variable independiente: smoker. Para los no fumadores la relación no parece lineal. Mientras que para los fumadores sí que se observa un comportamiento lineal, pero con una singularidad. Hay heterocedasticidad en este subgrupo, no es una relación lineal "al uso". Parece más bien que se clasifican en dos bloques, con punto de corte bmi en torno a 30. Dentro de cada bloque hay una correlación lineal positiva.
+
+Para la gráfica de no fumadores, vemos que hay ciertos individuos que tienen unas charges bastante más elevadas que la mayoría de la población. Vamos a ver si alguno del resto de factores nos ayuda a explicar esto:
+
+```{r}
+plot <- ggplot(df) +
+  geom_point(aes(x = bmi, y = charges, colour=age), alpha=0.5, shape=16) +
+  scale_color_gradient(low="blue", high="green") +
+  facet_wrap(~smoker)
+print(plot)
+
+plot <- ggplot(df) +
+  geom_point(aes(x = bmi, y = charges, colour=sex), alpha=0.5, shape=16) +
+  facet_wrap(~smoker)
+print(plot)
+
+plot <- ggplot(df) +
+  geom_point(aes(x = bmi, y = charges, colour=children), alpha=0.5, shape=16) +
+  facet_wrap(~smoker)
+print(plot)
+
+plot <- ggplot(df) +
+  geom_point(aes(x = bmi, y = charges, colour=region), alpha=0.5, shape=16) +
+  facet_wrap(~smoker)
+print(plot)
+```
+
+Salvo para age, que el gradiente de color revela la relación lineal que ya habíamos descubierto, las otras 3 variables no nos esclarecen nada (hice una prueba con los datos de children con sus valores numéricos originales, y tampoco se veía relación).
+
+A mi juicio, esto nos deja varias opciones: 1. la variable que explica ese salto no está incluida en el los datos recogidos; 2. el salto se explica con una combinación del resto de variables (children, region, sex), no con una sola.
+
+Rescatamos las primeras conclusiones (del análisis univariable, y las unimos a las conclusiones obtenidas del análisis bivariable)
+
+**Conclusiones EDA univariable**
+
+- Outliers en la variable target. Pueden tener una influencia excesiva en el tipo de modelo que usaremos
+- Cantidad de observaciones de menores de 20 años anómalamente alta.
+
+**Conclusiones EDA bivariable**
+
+- Las variables sex, children y region no parecen tener ninguna relación de dependencia con la variable objetivo
+- Age, smoker y bmi sí parecen tenerla
+  - Hay una relación lineal con age, pero mucha de la variabilidad en la variable target queda sin explicar
+  - Buena parte de esa variabilidad no explicada, se explica con la variable smoker
+  - Con la variable bmi quizá expliquemos variabilidad, pero no sería una variabilidad del todo lineal, y además parece que hay dependencia entre smoker y bmi
+- El dataset tiene una cantidad de observaciones relativamente pequeña. Hay que tener cuidado al manipular los datos porque cambios en unos pocos datos podrían afectar bastante a cómo se comporta el modelo.
+
+
+## 3. Preprocesado de datos
+
+Teniendo en cuenta las conclusiones recién expuestas, nos planteamos hacer ciertos cambios en nuestros datos:
+
+Como habíamos visto, teníamos un número de observaciones anómalamente alto para los individuos de 18 y 19 años, y tras el análisis bivariable no se ha visto que aporten ninguna información interesante. ¿Causas de esta anomalía? Podría ser representativo de la realidad, que por alguna razón se suscribiese un seguro de salud nada más cumplir los 18 años, y pasados dos años se decida no continuar. O podría ser un error a la hora de introducir los datos, o que hayan sido asignados menores de 18 años a estas edades. 
+
+*Ante la duda, considero que lo mejor es no alterar los datos originales.*
+
+En las múltiples gráficas que hemos hecho se ve que hay varias observaciones, en concreto aquellas que tienen charges > 50000, que se salen mucho del comportamiento que presentan el resto de observaciones. 
+
+*En primera instancia vamos a incluirlos en el modelo, pero estaremos atentos a la influencia que tienen.*
+
+## 4. Modelado
+
+Vamos a entrenar un modelo de regresión lineal con los factores que hemos visto en el EDA que pueden ser relevantes.A continuación, entrenaremos el modelo usando stepAIC.
+Finalmente, extraeremos conclusiones.
+
+### Modelo con los factores escogidos en el EDA
+
+```{r}
+regresion_relevantes <- lm(charges ~ age + smoker + bmi, data=df)
+summary(regresion_relevantes)
+```
+Todos los parámetros son estadísticamente significativos, y el r^2 es de 0.75. Vamos a comprobar cómo está ajustando nuestro modelo:
+
+```{r}
+prediccion <- regresion_relevantes$fitted.values
+residuos   <- regresion_relevantes$residuals
+cook<-cooks.distance(regresion_relevantes)
+```
+
+```{r}
+plot(regresion_relevantes)
+plot(prediccion)
+hist(residuos)
+plot(cook)
+```
+
+### Modelado con stepAIC
+
+```{r}
+fit1 <- lm(charges~., data=df)
+fit0 <- lm(charges~1, data=df)
+```
+
+
+```{r}
+regresion_step <- stepAIC(fit0,direction="both",scope=list(upper=fit1,lower=fit0))
+```
+
+Vemos que el modelo ha escogido, en primer lugar, las 3 variables que habíamos determinado tras el EDA, en primer lugar escoge smoker (era de esperar, es la variable que muestra una relación más clara), luego age y luego bmi. También considera relevantes para el modelo children y region (si bien el impacto que tienen en la bajada el AIC es bastante menor al de las otras tres variables). sex se queda fuera.
+
+```{r}
+summary(regresion_step)
+```
+R^2 ligerísimamente superior al modelo con las variables seleccionadas en el EDA, si bien estamos añadiendo variables (complejidad para el modelo)  que casi no ayudan a explicar más variabilidad. El p-valor para una de las regiones (northwest) indica que no se puede rechazar la hipótesis nula de que su coeficiente sea 0.
+
+```{r}
+prediccion <- regresion_step$fitted.values
+residuos   <- regresion_step$residuals
+cook<-cooks.distance(regresion_step)
+```
+
+```{r}
+plot(regresion_step)
+plot(prediccion)
+hist(residuos)
+plot(cook)
+```
+
+Vemos que los resultados del modelado con las variables adicionales, son muy similares al modelado sin dichas variables.
+
+Vamos a fijarnos en la primera gráfica, residuals vs fitted. 
+
+Y ahora vamos a fijarnos en la nube de puntos que destaca arriba a la izquierda (residuos positivos, es decir el valor real bastante por encima del predicho). Parece que se corresponde bastante bien con la nube que habíamos visto en el plot de bmi vs charges para no fumadores. El modelo no consigue explicar esos valores.
+
+Respecto a los valores más a la derecha del gráfico, vemos que hay dos subgrupos claros: para un grupo el modelo predice charges excesivas, para el otro grupo se queda corto. Se corresponde bastante con las observaciones que apuntamos en el EDA de no linealidad y división en bloques, cuando estudiamos las interrelaciones entre charges, bmi y smoker.
+
+Ningún outlier tiene una distancia de Cook superior a 1. Se podrían hacer más pruebas tratando los outliers, pero parece que está claro que ese no es el principal problema en este modelo, así que no lo vamos a hacer.
+
+Otra cosa con la que hay que tener cuidado con este modelo, es en los valores más bajos...
+```{r}
+hist(regresion_relevantes$fitted.values, 
+     border = "blue", 
+     col = "tomato", 
+     las = 1, 
+     main = "Histograma de charges predichas",
+     xlab  = "charges")
+```
+Si lo comparamos con el histograma de charges reales, vemos que en el grupo de (0,5000) el modelo lineal que hemos utilizado mete a mucha menos gente de la que hay en la realidad. Estaríamos siendo injustos con esa porción de la población. Y para algunas personas predice unas charges negativas.
+
+Solucionando los problemas que apuntamos anteriormente, ayudaríamos a mitigar esta distorsión.
+
+## 5. Conclusiones finales
+
+Hemos encontrado un modelo con r^2 alrededor de 0.75. Los factores más relevantes son smoker, age y bmi.
+
+En cuanto a la variabilidad no explicada, son interesantes los gráficos que hemos visto en el EDA, y la distribución de los residuals vs fitted en el modelo. A la vista de los análisis realizados se pueden establecer una serie de hipótesis que podrían servir como punto de partida para profundizar en este estudio, y conseguir mejorar el modelo:
+
+- Intentar encontrar un patrón para las desviaciones en el subgrupo de no fumadores, ya sea con una combinación de las variables que disponemos, o ampliando el estudio a más variables
+- Explorar otros modelados (de esto aún no he visto mucho, sólo el principio del módulo 6). Quizá una combinación de modelos de regresión lineal, apoyados en reglas de decisión podría funcionar bien (hemos visto que para fumadores, con un determinado rango de bmi, hay grupos bien diferenciados).
+
+
