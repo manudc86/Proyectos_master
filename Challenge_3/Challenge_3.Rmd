@@ -1,6 +1,6 @@
 ---
 title: "Caso práctico final"
-output: html_notebook
+output: rmarkdown::github_document
 ---
 
 # Descripción corta del challenge
